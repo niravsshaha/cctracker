@@ -61,6 +61,7 @@ td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
     <button data-t="tx" onclick="go('tx')">Transactions</button>
     <button data-t="bal" onclick="go('bal')">Balances</button>
     <button data-t="sum" onclick="go('sum')">Summary</button>
+    <button data-t="acc" onclick="go('acc')">Accounts</button>
     <button data-t="imp" onclick="go('imp')">Import</button>
     <button data-t="set" onclick="go('set')">Settings</button>
   </nav>
@@ -74,7 +75,8 @@ const DEFAULT_CARDS=['Zolve Classic','Apple Card','Discover it','Chase Freedom U
 const DEFAULT_CATS=['Groceries','Dining','Gas','Travel','Shopping','Entertainment','Bills','Health','Other'];
 const DEFAULT_RULES=[['costco','Groceries'],['walmart','Groceries'],['patel','Groceries'],['trader joe','Groceries'],['whole foods','Groceries'],['uber eats','Dining'],['doordash','Dining'],['uber','Travel'],['lyft','Travel'],['airlines','Travel'],['shell','Gas'],['chevron','Gas'],['exxon','Gas'],['netflix','Entertainment'],['spotify','Entertainment'],['amazon','Shopping'],['target','Shopping']].map(([k,c])=>({k,c}));
 
-function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice()}}
+const DEFAULT_ACCTS=['PNC Checking','PNC Growth','Chase Checking','SoFi','Wealthfront','Marcus'];
+function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx))return Object.assign(fresh(),s)}catch(e){}return fresh()}
 let state=load();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
@@ -111,12 +113,13 @@ function balances(){
 }
 
 /* ---------- ui state ---------- */
-let ui={tab:'tx',month:'all',card:'',q:'',filter:'all',sumMonth:'all'};
-let imp={text:'',rows:[],headers:[],map:{},card:'',sign:'pos',msg:''};
+let ui={tab:'tx',month:'all',card:'',q:'',filter:'all',sumMonth:'all',acct:''};
+let imp={text:'',rows:[],headers:[],map:{},card:'',sign:'pos',msg:'',kind:'card'};
+let bimp={text:'',blocks:[],year:new Date().getFullYear(),msg:''};
 function go(t){ui.tab=t;render()}
 function render(){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===ui.tab));
-  $('#app').innerHTML=({tx:vTx,bal:vBal,sum:vSum,imp:vImp,set:vSet})[ui.tab]();
+  $('#app').innerHTML=({tx:vTx,bal:vBal,sum:vSum,acc:vAcc,imp:vImp,set:vSet})[ui.tab]();
 }
 const months=()=>[...new Set(state.tx.map(t=>t.date.slice(0,7)))].sort().reverse();
 const monthOpts=sel=>'<option value="all">All months</option>'+months().map(m=>`<option ${m===sel?'selected':''}>${m}</option>`).join('');
@@ -241,6 +244,54 @@ function settle(pid){
   state.settlements.push({id:uid(),person:pid,amount:r2(n),dir,date:today()});save();render();
 }
 
+/* ---------- bank accounts ---------- */
+function acctBal(a){return r2((+a.opening||0)+state.ledger.filter(e=>e.acct===a.id).reduce((s,e)=>s+(+e.credit||0)-(+e.debit||0),0))}
+function vAcc(){
+  if(!state.accounts.length)return '<div class="empty">Add bank accounts in Settings.</div>';
+  if(!state.accounts.some(a=>a.id===ui.acct))ui.acct=state.accounts[0].id;
+  const a=state.accounts.find(x=>x.id===ui.acct);
+  const total=r2(state.accounts.reduce((s,x)=>s+acctBal(x),0));
+  let run=+a.opening||0;
+  const rows=state.ledger.filter(e=>e.acct===a.id).sort((x,y)=>x.date.localeCompare(y.date)).map(e=>{run=r2(run+(+e.credit||0)-(+e.debit||0));return{e,bal:run}}).reverse();
+  const amt=e=>e.debit&&e.credit?'+'+money(+e.credit)+' / −'+money(+e.debit):(+e.credit?'+'+money(+e.credit):'−'+money(+e.debit));
+  return `<div class="panel"><div class="sub">Total across accounts</div><div style="font-size:22px;font-weight:600">${money(total)}</div></div>
+   <div class="grid" style="margin-bottom:14px">${state.accounts.map(x=>`<div class="panel" style="margin:0;cursor:pointer;${x.id===a.id?'border-color:var(--acc)':''}" onclick="ui.acct='${x.id}';render()"><div class="sub">${esc(x.name)}</div><div style="font-size:18px;font-weight:600">${money(acctBal(x))}</div></div>`).join('')}</div>
+   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"><button class="btn" onclick="openEntry()">+ Add entry to ${esc(a.name)}</button><button class="btn ghost" onclick="setOpening('${a.id}')">Opening balance (${money(+a.opening||0)})</button></div>
+   ${rows.length?rows.slice(0,200).map(({e,bal})=>`<div class="row"><div class="main"><b>${esc(e.reason||e.who||'—')}</b><div class="sub">${e.date}${e.who&&e.reason?' · '+esc(e.who):''}</div></div><div class="amt ${e.credit>e.debit?'pos':e.debit>e.credit?'neg':''}">${amt(e)}</div><div class="sub" style="min-width:90px;text-align:right">${money(bal)}</div><button class="btn ghost sm" onclick="openEntry('${e.id}')">Edit</button></div>`).join('')+(rows.length>200?`<div class="sub">Showing the latest 200 of ${rows.length}.</div>`:''):'<div class="empty">No entries yet. Add one, or use Import → Bank account ledger.</div>'}`;
+}
+let ed=null;
+function openEntry(id){
+  const e=id&&state.ledger.find(x=>x.id===id);
+  ed=e?{id:e.id,acct:e.acct,date:e.date,who:e.who||'',reason:e.reason||'',debit:e.debit||'',credit:e.credit||''}:{id:null,acct:ui.acct,date:today(),who:'',reason:'',debit:'',credit:''};
+  drawEntry();$('#dlg').showModal();
+}
+function drawEntry(){
+  const d=ed;
+  $('#dlg').innerHTML=`<h3 style="margin-top:0">${d.id?'Edit':'Add'} entry</h3><div class="grid">
+    <label>Account<select onchange="ed.acct=this.value">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===d.acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label>
+    <label>Date<input type="date" value="${d.date}" oninput="ed.date=this.value"></label>
+    <label>Who / payee<input value="${esc(d.who)}" oninput="ed.who=this.value"></label>
+    <label>Reason<input value="${esc(d.reason)}" oninput="ed.reason=this.value"></label>
+    <label>Money out (debit)<input type="number" step="0.01" value="${d.debit}" oninput="ed.debit=this.value"></label>
+    <label>Money in (credit)<input type="number" step="0.01" value="${d.credit}" oninput="ed.credit=this.value"></label></div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:space-between"><div>${d.id?'<button class="btn danger" onclick="delEntry()">Delete</button>':''}</div>
+    <div style="display:flex;gap:8px"><button class="btn ghost" onclick="$('#dlg').close()">Cancel</button><button class="btn" onclick="saveEntry()">Save</button></div></div>`;
+}
+function saveEntry(){
+  const d=ed,db=+d.debit||0,cr=+d.credit||0;
+  if(!d.date)return alert('Pick a date.');
+  if(!(db>0||cr>0))return alert('Enter an amount in Money out or Money in.');
+  const e={id:d.id||uid(),acct:d.acct,date:d.date,who:d.who.trim(),reason:d.reason.trim(),debit:r2(db),credit:r2(cr)};
+  if(d.id){const i=state.ledger.findIndex(x=>x.id===d.id);state.ledger[i]=e}else state.ledger.push(e);
+  ui.acct=e.acct;save();$('#dlg').close();render();
+}
+function delEntry(){if(confirm('Delete this entry?')){state.ledger=state.ledger.filter(x=>x.id!==ed.id);save();$('#dlg').close();render()}}
+function setOpening(id){
+  const a=state.accounts.find(x=>x.id===id);
+  const v=prompt('Opening balance for '+a.name+' (the balance before the first entry):',a.opening||0);
+  if(v===null)return;const n=parseFloat(v);if(isNaN(n))return;a.opening=r2(n);save();render();
+}
+
 /* ---------- summary ---------- */
 function vSum(){
   const list=state.tx.filter(t=>ui.sumMonth==='all'||t.date.startsWith(ui.sumMonth));
@@ -298,9 +349,11 @@ function candidates(){
   return {out,skipped,dupes,bad};
 }
 function vImp(){
+  const tog=`<div class="filters"><select onchange="imp.kind=this.value;render()"><option value="card" ${imp.kind!=='bank'?'selected':''}>Card statement</option><option value="bank" ${imp.kind==='bank'?'selected':''}>Bank account ledger</option></select></div>`;
+  if(imp.kind==='bank')return tog+vBankImp();
   const c=candidates();
   const sel=(k)=>`<select onchange="imp.map.${k}=this.value;render()"><option value="">—</option>${imp.headers.map((h,i)=>`<option value="${i}" ${String(i)===String(imp.map[k])?'selected':''}>${esc(h)}</option>`).join('')}</select>`;
-  return `<div class="panel"><h3>Import a card statement</h3>
+  return tog+`<div class="panel"><h3>Import a card statement</h3>
     <div class="sub" style="margin-bottom:8px">Download the CSV from your card issuer, then choose the file or paste its contents. Parsing happens in your browser; nothing is uploaded.</div>
     <input type="file" accept=".csv,text/csv,text/plain" onchange="readFile(this)">
     <textarea rows="5" placeholder="…or paste CSV here (first row = headers)" style="margin-top:8px" oninput="imp.text=this.value">${esc(imp.text)}</textarea>
@@ -323,6 +376,64 @@ function runImport(){
   ui.tab='tx';ui.filter='review';ui.month='all';render();alert(n+' transactions imported. Review them below.');
 }
 
+/* ---------- bank import ---------- */
+function vBankImp(){
+  const b=bimp;
+  return `<div class="panel"><h3>Import a bank ledger</h3>
+   <div class="sub" style="margin-bottom:8px">Use a bank tab exported from your sheet (File → Download → CSV) or a bank statement CSV. It looks for columns named Date, Who, Reason, Debit (money out) and Credit (money in). A tab with several ledgers, like PNC's Growth and checking, is split into blocks you can send to different accounts. Nothing is uploaded.</div>
+   <input type="file" accept=".csv,text/csv,text/plain" onchange="readBankFile(this)">
+   <textarea rows="5" placeholder="…or paste CSV here" style="margin-top:8px" oninput="bimp.text=this.value">${esc(b.text)}</textarea>
+   <div class="grid" style="margin-top:8px"><label>Year for dates without a year (like “2 Sep”)<input type="number" value="${b.year}" oninput="bimp.year=+this.value"></label></div>
+   <div style="margin-top:8px"><button class="btn" onclick="parseBank();render()">Read CSV</button></div>
+   ${b.msg?`<div class="msg" style="margin-top:8px">${esc(b.msg)}</div>`:''}</div>
+   ${b.blocks.map((k,i)=>`<div class="panel"><h3>${esc(k.title||'Ledger '+(i+1))} · ${k.rows.length} entries</h3>
+     <label>Import into<select onchange="bimp.blocks[${i}].acct=this.value;render()"><option value="">Skip this block</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===k.acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label>
+     <table style="margin-top:8px">${k.rows.slice(0,4).map(r=>`<tr><td>${r.date}</td><td>${esc(r.who)}</td><td>${esc(r.reason)}</td><td style="text-align:right">${r.debit?'−'+money(r.debit):''} ${r.credit?'+'+money(r.credit):''}</td></tr>`).join('')}</table></div>`).join('')}
+   ${b.blocks.some(k=>k.acct)?'<button class="btn" onclick="runBankImport()">Import selected blocks</button>':''}`;
+}
+function readBankFile(el){const f=el.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{bimp.text=String(r.result);parseBank();render()};r.readAsText(f)}
+function parseDate2(s,year){
+  const d=parseDate(s);if(d)return d;
+  const m=(s||'').trim().match(/^(\d{1,2})\s+([A-Za-z]{3})/);if(!m)return null;
+  const M={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}[m[2].toLowerCase()];
+  return M?`${year}-${String(M).padStart(2,'0')}-${m[1].padStart(2,'0')}`:null;
+}
+function parseBank(){
+  const rows=parseCSV(bimp.text);bimp.blocks=[];
+  const norm=s=>(s||'').trim().toLowerCase();
+  const heads=[];
+  rows.forEach((r,i)=>{const c=r.map(norm);if(c.includes('date')&&(c.includes('debit')||c.includes('credit')))heads.push(i)});
+  if(!heads.length){bimp.msg='Could not find a header row with Date and Debit/Credit columns.';return}
+  heads.forEach((hi,n)=>{
+    const c=rows[hi].map(norm);
+    const iD=c.indexOf('date'),iW=c.indexOf('who'),iR=c.findIndex(x=>x==='reason'||x==='description'||x==='payee'||x==='memo'),iDb=c.indexOf('debit'),iCr=c.indexOf('credit');
+    let title='';
+    for(let j=hi-1;j>=Math.max(0,hi-3);j--){const cells=rows[j].map(x=>x.trim()).filter(Boolean);if(cells.length===1){title=cells[0];break}}
+    const end=n+1<heads.length?heads[n+1]:rows.length,out=[];
+    for(let j=hi+1;j<end;j++){
+      const r=rows[j],date=parseDate2(r[iD],bimp.year);if(!date)continue;
+      const db=iDb>=0?num(r[iDb]):null,cr=iCr>=0?num(r[iCr]):null;
+      if(!(db>0)&&!(cr>0))continue;
+      out.push({date,who:iW>=0?(r[iW]||'').trim():'',reason:iR>=0?(r[iR]||'').trim():'',debit:db>0?r2(db):0,credit:cr>0?r2(cr):0});
+    }
+    const t=norm(title),hits=t?state.accounts.filter(a=>norm(a.name).includes(t)):[];
+    bimp.blocks.push({title,rows:out,acct:hits.length===1?hits[0].id:''});
+  });
+  bimp.msg=bimp.blocks.length+' ledger block(s) found. Choose the account for each, then import.';
+}
+function runBankImport(){
+  const key=(a,r)=>[a,r.date,r.who,r.reason,r.debit,r.credit].join('|');
+  const have={};state.ledger.forEach(e=>{const k=key(e.acct,e);have[k]=(have[k]||0)+1});
+  let added=0,dupes=0;
+  bimp.blocks.forEach(k=>{if(!k.acct)return;k.rows.forEach(r=>{
+    const kk=key(k.acct,r);
+    if(have[kk]>0){have[kk]--;dupes++;return}
+    state.ledger.push({id:uid(),acct:k.acct,date:r.date,who:r.who,reason:r.reason,debit:r.debit,credit:r.credit});added++;
+  })});
+  save();bimp.blocks=[];bimp.text='';bimp.msg=added+' entries imported'+(dupes?', '+dupes+' duplicates skipped':'')+'.';
+  ui.tab='acc';render();alert(bimp.msg);
+}
+
 /* ---------- settings ---------- */
 function chips(arr,fn,del){return `<div class="chips">${arr.map((x,i)=>`<span class="chip">${esc(fn(x))}<button title="Remove" onclick="${del}(${i})">✕</button></span>`).join('')||'<span class="sub">None yet</span>'}</div>`}
 function vSet(){
@@ -335,6 +446,8 @@ function vSet(){
     <div class="panel"><h3>Auto-category rules</h3><div class="sub" style="margin-bottom:6px">If a merchant contains the text, it gets that category.</div>
       ${chips(state.rules,r=>r.k+' → '+r.c,'delRule')}
       <div style="display:flex;gap:8px;margin-top:10px"><input id="rk" placeholder="Merchant contains…"><select id="rc">${state.cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="addRule()">Add</button></div></div>
+    <div class="panel"><h3>Bank accounts</h3>${chips(state.accounts,a=>a.name,'delAcct')}
+      <div style="display:flex;gap:8px;margin-top:10px"><input id="nacct" placeholder="Account name"><button class="btn" onclick="addAcct()">Add</button></div></div>
     <div class="panel"><h3>Backup</h3><div class="sub" style="margin-bottom:8px">Your data lives only in this browser. Download a backup now and then, and use it to move to another device.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="exportJSON()">Download backup</button>
       <label class="btn ghost" style="display:inline-block;cursor:pointer;color:var(--acc)">Restore backup<input type="file" accept=".json" hidden onchange="restoreJSON(this)"></label>
@@ -345,6 +458,8 @@ function addPerson(){const v=$('#np').value.trim();if(!v)return;state.people.pus
 function delPerson(i){const p=state.people[i];if(state.tx.some(t=>t.shared&&(t.paidBy===p.id||t.split.with.includes(p.id)))&&!confirm(p.name+' appears in shared expenses. Remove anyway?'))return;state.people.splice(i,1);save();render()}
 function addCard(){const v=$('#nc').value.trim();if(!v||state.cards.includes(v))return;state.cards.push(v);save();render()}
 function delCard(i){state.cards.splice(i,1);save();render()}
+function addAcct(){const v=$('#nacct').value.trim();if(!v)return;state.accounts.push({id:'acct_'+uid(),name:v,opening:0});save();render()}
+function delAcct(i){const a=state.accounts[i],n=state.ledger.filter(e=>e.acct===a.id).length;if(n&&!confirm(a.name+' has '+n+' entries. Remove the account and its entries?'))return;state.ledger=state.ledger.filter(e=>e.acct!==a.id);state.accounts.splice(i,1);save();render()}
 function addCat(){const v=$('#ncat').value.trim();if(!v||state.cats.includes(v))return;state.cats.push(v);save();render()}
 function delCat(i){state.cats.splice(i,1);save();render()}
 function addRule(){const k=$('#rk').value.trim();if(!k)return;state.rules.unshift({k,c:$('#rc').value});save();render()}
