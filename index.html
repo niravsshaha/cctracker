@@ -56,7 +56,7 @@ td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
 </head>
 <body>
 <header>
-  <div class="bar"><h1>Card Tracker</h1><button class="btn" onclick="openTx()">+ Add transaction</button></div>
+  <div class="bar"><h1>Card Tracker</h1><span id="syncbadge" class="sub" style="margin-left:auto;margin-right:10px"></span><button class="btn" onclick="openTx()">+ Add transaction</button></div>
   <nav>
     <button data-t="tx" onclick="go('tx')">Transactions</button>
     <button data-t="cards" onclick="go('cards')">Cards</button>
@@ -80,7 +80,84 @@ const DEFAULT_ACCTS=['PNC Checking','PNC Growth','Chase Checking','SoFi','Wealth
 function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),cardStart:{},cardOwed:{},cardPay:[],accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx))return Object.assign(fresh(),s)}catch(e){}return fresh()}
 let state=load();
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
+function save(){state._updated=Date.now();try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}schedulePush()}
+/* ---- GitHub sync (private data repo, Contents API) ---- */
+const SYNC_KEY='cctracker.sync';
+let remoteSha=null,pushTimer=null,pushing=false,syncMsg='';
+function syncCfg(){try{const c=JSON.parse(localStorage.getItem(SYNC_KEY));if(c&&c.token&&c.repo)return Object.assign({path:'data.json',branch:'main'},c)}catch(e){}return null}
+function syncOn(){return !!syncCfg()}
+function b64(str){const b=new TextEncoder().encode(str);let r='';for(let i=0;i<b.length;i+=0x8000)r+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(r)}
+function unb64(x){const r=atob(x.replace(/\s/g,''));const b=new Uint8Array(r.length);for(let i=0;i<r.length;i++)b[i]=r.charCodeAt(i);return new TextDecoder().decode(b)}
+function ghUrl(c){return 'https://api.github.com/repos/'+c.repo+'/contents/'+c.path}
+function ghHeaders(c){return{'Authorization':'Bearer '+c.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}}
+async function ghFetch(c){
+  const r=await fetch(ghUrl(c)+'?ref='+c.branch+'&t='+Date.now(),{headers:ghHeaders(c),cache:'no-store'});
+  if(r.status===404){remoteSha=null;return null}
+  if(!r.ok)throw new Error('GitHub '+r.status+(r.status===401?' (token rejected)':''));
+  const j=await r.json();remoteSha=j.sha;
+  return JSON.parse(unb64(j.content));
+}
+async function ghPush(c){
+  const body={message:'tracker update '+new Date().toISOString(),content:b64(JSON.stringify(state)),branch:c.branch};
+  if(remoteSha)body.sha=remoteSha;
+  const r=await fetch(ghUrl(c),{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},ghHeaders(c)),body:JSON.stringify(body)});
+  if(r.status===409||r.status===422)return 'conflict';
+  if(!r.ok)throw new Error('GitHub '+r.status+(r.status===401||r.status===403?' (token problem)':''));
+  const j=await r.json();remoteSha=j.content.sha;return 'ok';
+}
+function setBadge(t,bad){const b=document.getElementById('syncbadge');if(b){b.textContent=t;b.style.color=bad?'#c0392b':''}}
+function schedulePush(){if(!syncOn())return;setBadge('● unsynced');clearTimeout(pushTimer);pushTimer=setTimeout(syncPush,1500)}
+async function syncPush(){
+  const c=syncCfg();if(!c)return;
+  if(pushing){schedulePush();return}
+  pushing=true;
+  try{
+    let res=await ghPush(c);
+    if(res==='conflict'){
+      const rem=await ghFetch(c);
+      if(rem&&(rem._updated||0)>(state._updated||0)){applyRemote(rem);setBadge('✓ pulled newer');pushing=false;return}
+      res=await ghPush(c);
+      if(res==='conflict')throw new Error('conflict, try again');
+    }
+    setBadge('✓ saved to GitHub');syncMsg='Last saved '+new Date().toLocaleTimeString();
+  }catch(e){setBadge('⚠ sync failed',true);syncMsg='Sync error: '+e.message}
+  pushing=false;
+}
+function applyRemote(rem){state=Object.assign(fresh(),rem);try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}render()}
+async function syncPull(auto){
+  const c=syncCfg();if(!c)return;
+  try{
+    setBadge('… syncing');
+    const rem=await ghFetch(c);
+    if(!rem){await syncPush();return}
+    const ru=rem._updated||0,lu=state._updated||0;
+    if(ru>lu){applyRemote(rem);setBadge('✓ loaded from GitHub');syncMsg='Loaded latest from GitHub'}
+    else if(lu>ru){await syncPush()}
+    else{setBadge('✓ in sync');syncMsg='In sync'}
+  }catch(e){setBadge('⚠ sync failed',true);syncMsg='Sync error: '+e.message;if(!auto)alert(syncMsg)}
+}
+async function syncForce(){clearTimeout(pushTimer);await syncPush();if(curTab()==='set')render()}
+function curTab(){return ui.tab}
+async function connectSync(){
+  const token=document.getElementById('sy_tok').value.trim(),repo=document.getElementById('sy_repo').value.trim();
+  if(!token||!/^[\w.-]+\/[\w.-]+$/.test(repo)){alert('Enter the repo as owner/name and paste the token.');return}
+  const c={token,repo,path:'data.json',branch:'main'};
+  try{
+    const rem=await ghFetch(c);
+    localStorage.setItem(SYNC_KEY,JSON.stringify(c));
+    if(rem&&(rem._updated||0)>(state._updated||0)){applyRemote(rem)}
+    else{await syncPush()}
+    setBadge('✓ connected');render();
+  }catch(e){alert('Could not connect: '+e.message)}
+}
+function disconnectSync(){if(!confirm('Stop syncing on this device? The GitHub copy stays.'))return;localStorage.removeItem(SYNC_KEY);remoteSha=null;setBadge('');render()}
+function vSyncPanel(){
+  const c=syncCfg();
+  if(c)return `<div class="panel"><h3>GitHub sync</h3><div class="sub" style="margin-bottom:8px">Saving automatically to <b>${esc(c.repo)}</b> after every change. ${esc(syncMsg)}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="syncForce()">Save now</button><button class="btn" onclick="syncPull(false)">Load from GitHub</button><button class="btn" onclick="disconnectSync()">Disconnect</button></div></div>`;
+  return `<div class="panel"><h3>GitHub sync</h3><div class="sub" style="margin-bottom:8px">Save every change to a private GitHub repo and load it when you open the page. Create a fine-grained token limited to that one repo with Contents: Read and write. It is stored only in this browser.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="sy_repo" placeholder="owner/repo" value="niravsshaha/cctracker-data"><input id="sy_tok" type="password" placeholder="Token" autocomplete="off"><button class="btn" onclick="connectSync()">Connect</button></div></div>`;
+}
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -512,7 +589,8 @@ function vSet(){
       <div style="display:flex;gap:8px;margin-top:10px"><input id="rk" placeholder="Merchant contains…"><select id="rc">${state.cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="addRule()">Add</button></div></div>
     <div class="panel"><h3>Bank accounts</h3>${chips(state.accounts,a=>a.name,'delAcct')}
       <div style="display:flex;gap:8px;margin-top:10px"><input id="nacct" placeholder="Account name"><button class="btn" onclick="addAcct()">Add</button></div></div>
-    <div class="panel"><h3>Backup</h3><div class="sub" style="margin-bottom:8px">Your data lives only in this browser. Download a backup now and then, and use it to move to another device.</div>
+    ${vSyncPanel()}
+    <div class="panel"><h3>Backup</h3><div class="sub" style="margin-bottom:8px">Without GitHub sync your data lives only in this browser. Download a backup now and then, and use it to move to another device.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="exportJSON()">Download backup</button>
       <label class="btn ghost" style="display:inline-block;cursor:pointer;color:var(--acc)">Restore backup<input type="file" accept=".json" hidden onchange="restoreJSON(this)"></label>
       <button class="btn ghost" onclick="exportCSV()">Export CSV</button>
@@ -537,9 +615,10 @@ function exportCSV(){
   state.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>lines.push([t.date,t.merchant,t.amount,t.card,t.category,t.shared?'yes':'no',pname(t.paidBy),t.shared?t.split.with.map(pname).join('; '):'',r2(shareOf(t,'me')),t.shared?(t.inSW?'yes':'no'):'',t.note].map(q).join(',')));
   download('cctracker-'+today()+'.csv',lines.join('\n'),'text/csv');
 }
-function wipe(){if(confirm('Erase all transactions, people and settings from this browser?')&&confirm('This cannot be undone. Continue?')){state=fresh();save();render()}}
+function wipe(){if(confirm('Erase all transactions, people and settings from this browser?'+(syncOn()?' GitHub sync is on, so the GitHub copy will be overwritten too.':''))&&confirm('This cannot be undone. Continue?')){state=fresh();save();render()}}
 
 render();
+if(syncOn())syncPull(true);
 </script>
 </body>
 </html>
