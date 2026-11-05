@@ -76,7 +76,7 @@ const DEFAULT_CATS=['Groceries','Dining','Gas','Travel','Shopping','Entertainmen
 const DEFAULT_RULES=[['costco','Groceries'],['walmart','Groceries'],['patel','Groceries'],['trader joe','Groceries'],['whole foods','Groceries'],['uber eats','Dining'],['doordash','Dining'],['uber','Travel'],['lyft','Travel'],['airlines','Travel'],['shell','Gas'],['chevron','Gas'],['exxon','Gas'],['netflix','Entertainment'],['spotify','Entertainment'],['amazon','Shopping'],['target','Shopping']].map(([k,c])=>({k,c}));
 
 const DEFAULT_ACCTS=['PNC Checking','PNC Growth','Chase Checking','SoFi','Wealthfront','Marcus'];
-function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
+function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),cardStart:{},accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx))return Object.assign(fresh(),s)}catch(e){}return fresh()}
 let state=load();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
@@ -98,7 +98,7 @@ function shareOf(t,id){
   return t.amount/w.length;
 }
 function balances(){
-  const b={};state.people.forEach(p=>b[p.id]=0);
+  const b={};state.people.forEach(p=>b[p.id]=+p.opening||0);
   state.tx.forEach(t=>{
     if(!t.shared)return;
     t.split.with.forEach(p=>{
@@ -322,6 +322,7 @@ function setOpening(id){
 function vSum(){
   const list=state.tx.filter(t=>ui.sumMonth==='all'||t.date.startsWith(ui.sumMonth));
   const byCard={},byCat={};let mine=0;
+  if(ui.sumMonth==='all')Object.entries(state.cardStart||{}).forEach(([k,v])=>{byCard[k]=(byCard[k]||0)+(+v||0)});
   list.forEach(t=>{if(t.paidBy==='me')byCard[t.card||'—']=(byCard[t.card||'—']||0)+t.amount;
     const s=shareOf(t,'me');mine+=s;if(s)byCat[t.category]=(byCat[t.category]||0)+s});
   const bars=o=>{const e=Object.entries(o).sort((a,b)=>b[1]-a[1]),mx=e.length?e[0][1]:1;
@@ -331,7 +332,7 @@ function vSum(){
     <div class="grid" style="margin-bottom:14px">
       <div class="panel" style="margin:0"><div class="sub">Charged to your cards</div><div style="font-size:22px;font-weight:600">${money(cardTotal)}</div></div>
       <div class="panel" style="margin:0"><div class="sub">Your actual share</div><div style="font-size:22px;font-weight:600">${money(mine)}</div></div></div>
-    <div class="panel"><h3>By card (what you paid)</h3>${bars(byCard)}</div>
+    <div class="panel"><h3>By card (what you paid${ui.sumMonth==='all'&&Object.keys(state.cardStart||{}).length?', incl. starting spend':''})</h3>${bars(byCard)}</div>
     <div class="panel"><h3>By category (your share)</h3>${bars(byCat)}</div>`;
 }
 
