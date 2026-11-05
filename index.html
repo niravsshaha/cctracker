@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Card Tracker</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2128;--mute:#6b7480;--line:#e3e6ea;--acc:#2f6fed;--good:#12805c;--bad:#c23b3b;--warn:#b7791f}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2127;--ink:#e8eaed;--mute:#9aa3ad;--line:#2d333b;--acc:#6c9bff;--good:#3ecf9a;--bad:#ff7b7b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);z-index:5}
+.bar{max-width:900px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;flex:1}
+nav{display:flex;gap:4px;max-width:900px;margin:0 auto;padding:0 12px 8px;overflow-x:auto}
+nav button{background:none;border:0;color:var(--mute);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;white-space:nowrap}
+nav button.on{background:var(--acc);color:#fff}
+main{max-width:900px;margin:0 auto;padding:16px}
+button,select,input,textarea{font:inherit;color:var(--ink)}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:7px 14px;cursor:pointer}
+.btn.ghost{background:none;color:var(--acc);border:1px solid var(--line)}
+.btn.sm{padding:3px 9px;font-size:13px}
+.btn.danger{background:none;color:var(--bad);border:1px solid var(--line)}
+input,select,textarea{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+input[type=checkbox],input[type=radio]{width:auto}
+label{display:block;font-size:13px;color:var(--mute)}
+label input,label select{margin-top:3px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filters>*{flex:1;min-width:120px}
+.row{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row .main{flex:1;min-width:180px}
+.row .amt{font-weight:600;font-variant-numeric:tabular-nums}
+.sub{color:var(--mute);font-size:13px}
+.tag{display:inline-block;font-size:12px;border-radius:99px;padding:1px 8px;border:1px solid var(--line);margin-right:4px;color:var(--mute)}
+.tag.sh{color:var(--acc);border-color:var(--acc)}
+.tag.rv{color:var(--warn);border-color:var(--warn)}
+.tag.ok{color:var(--good);border-color:var(--good)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.panel h3{margin:0 0 8px;font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.pos{color:var(--good)}.neg{color:var(--bad)}
+.barwrap{display:flex;align-items:center;gap:8px;margin:5px 0}
+.barwrap .n{width:150px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar2{height:10px;background:var(--acc);border-radius:5px;min-width:2px}
+.barwrap .v{font-size:13px;font-variant-numeric:tabular-nums;color:var(--mute)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(560px,94vw);padding:18px;max-height:92vh}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:3px 10px;display:inline-flex;gap:6px;align-items:center;font-size:13px}
+.chip button{background:none;border:0;color:var(--bad);cursor:pointer;padding:0}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+.empty{color:var(--mute);text-align:center;padding:30px 0}
+.msg{background:var(--bg);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--mute)}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"><h1>Card Tracker</h1><button class="btn" onclick="openTx()">+ Add transaction</button></div>
+  <nav>
+    <button data-t="tx" onclick="go('tx')">Transactions</button>
+    <button data-t="bal" onclick="go('bal')">Balances</button>
+    <button data-t="sum" onclick="go('sum')">Summary</button>
+    <button data-t="imp" onclick="go('imp')">Import</button>
+    <button data-t="set" onclick="go('set')">Settings</button>
+  </nav>
+</header>
+<main id="app"></main>
+<dialog id="dlg"></dialog>
+
+<script>
+const KEY='cctracker.v1';
+const DEFAULT_CARDS=['Zolve Classic','Apple Card','Discover it','Chase Freedom Unlimited','Capital One Venture X','Chase Sapphire Reserve','Chase Sapphire Preferred','Amex Blue Cash Everyday','Citi Custom Cash'];
+const DEFAULT_CATS=['Groceries','Dining','Gas','Travel','Shopping','Entertainment','Bills','Health','Other'];
+const DEFAULT_RULES=[['costco','Groceries'],['walmart','Groceries'],['patel','Groceries'],['trader joe','Groceries'],['whole foods','Groceries'],['uber eats','Dining'],['doordash','Dining'],['uber','Travel'],['lyft','Travel'],['airlines','Travel'],['shell','Gas'],['chevron','Gas'],['exxon','Gas'],['netflix','Entertainment'],['spotify','Entertainment'],['amazon','Shopping'],['target','Shopping']].map(([k,c])=>({k,c}));
+
+function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice()}}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx))return Object.assign(fresh(),s)}catch(e){}return fresh()}
+let state=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const r2=n=>Math.round(n*100)/100;
+const money=n=>(n<0?'-':'')+'$'+Math.abs(n).toFixed(2);
+const uid=()=>Math.random().toString(36).slice(2,10);
+const pname=id=>id==='me'?'You':(state.people.find(p=>p.id===id)||{name:'?'}).name;
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const guess=m=>{const l=(m||'').toLowerCase();const r=state.rules.find(x=>l.includes(x.k.toLowerCase()));return r?r.c:'Other'};
+
+/* ---------- split math ---------- */
+function shareOf(t,id){
+  if(!t.shared)return id==='me'?t.amount:0;
+  const w=t.split.with;if(!w.includes(id))return 0;
+  if(t.split.type==='custom')return +(t.split.amounts[id]||0);
+  return t.amount/w.length;
+}
+function balances(){
+  const b={};state.people.forEach(p=>b[p.id]=0);
+  state.tx.forEach(t=>{
+    if(!t.shared)return;
+    t.split.with.forEach(p=>{
+      if(p==='me'||!(p in b))return;
+      if(t.paidBy==='me')b[p]+=shareOf(t,p);
+      else if(t.paidBy===p)b[p]-=shareOf(t,'me');
+    });
+  });
+  state.settlements.forEach(s=>{if(s.person in b)b[s.person]+=(s.dir==='in'?-s.amount:s.amount)});
+  Object.keys(b).forEach(k=>b[k]=r2(b[k]));
+  return b;
+}
+
+/* ---------- ui state ---------- */
+let ui={tab:'tx',month:'all',card:'',q:'',filter:'all',sumMonth:'all'};
+let imp={text:'',rows:[],headers:[],map:{},card:'',sign:'pos',msg:''};
+function go(t){ui.tab=t;render()}
+function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===ui.tab));
+  $('#app').innerHTML=({tx:vTx,bal:vBal,sum:vSum,imp:vImp,set:vSet})[ui.tab]();
+}
+const months=()=>[...new Set(state.tx.map(t=>t.date.slice(0,7)))].sort().reverse();
+const monthOpts=sel=>'<option value="all">All months</option>'+months().map(m=>`<option ${m===sel?'selected':''}>${m}</option>`).join('');
+
+/* ---------- transactions view ---------- */
+function filtered(){
+  return state.tx.filter(t=>(ui.month==='all'||t.date.startsWith(ui.month))&&(!ui.card||t.card===ui.card)
+    &&(!ui.q||(t.merchant+' '+t.category+' '+(t.note||'')).toLowerCase().includes(ui.q.toLowerCase()))
+    &&(ui.filter==='all'||(ui.filter==='review'&&!t.reviewed)||(ui.filter==='sw'&&t.shared&&!t.inSW)))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+}
+function vTx(){
+  const list=filtered(),total=list.reduce((s,t)=>s+t.amount,0);
+  const nRev=state.tx.filter(t=>!t.reviewed).length,nSw=state.tx.filter(t=>t.shared&&!t.inSW).length;
+  return `<div class="filters">
+    <select onchange="ui.month=this.value;render()">${monthOpts(ui.month)}</select>
+    <select onchange="ui.card=this.value;render()"><option value="">All cards</option>${state.cards.map(c=>`<option ${c===ui.card?'selected':''}>${esc(c)}</option>`).join('')}</select>
+    <select onchange="ui.filter=this.value;render()">
+      <option value="all">Everything</option>
+      <option value="review" ${ui.filter==='review'?'selected':''}>Needs review (${nRev})</option>
+      <option value="sw" ${ui.filter==='sw'?'selected':''}>Not in Splitwise yet (${nSw})</option></select>
+    <input placeholder="Search…" value="${esc(ui.q)}" onchange="ui.q=this.value;render()"></div>
+    <div class="sub" style="margin-bottom:8px">${list.length} transactions · ${money(total)}</div>`+
+    (list.length?list.map(txRow).join(''):'<div class="empty">No transactions yet. Add one, or use Import to bring in a card statement.</div>');
+}
+function txRow(t){
+  const paid=t.paidBy==='me'?esc(t.card||'no card'):`Paid by ${esc(pname(t.paidBy))}`;
+  const tags=(t.reviewed?'':'<span class="tag rv">review</span>')
+    +(t.shared?`<span class="tag sh">split with ${t.split.with.filter(x=>x!=='me').map(x=>esc(pname(x))).join(', ')||'—'}</span>`+(t.inSW?'<span class="tag ok">in Splitwise</span>':''):'');
+  return `<div class="row"><div class="main"><div><b>${esc(t.merchant)}</b></div>
+    <div class="sub">${t.date} · ${paid} · ${esc(t.category)}</div><div style="margin-top:3px">${tags}</div></div>
+    <div class="amt">${money(t.amount)}</div><div style="display:flex;gap:5px;flex-wrap:wrap">
+    ${!t.reviewed?`<button class="btn ghost sm" onclick="markPersonal('${t.id}')">Personal ✓</button>`:''}
+    ${t.shared?`<button class="btn ghost sm" onclick="copySW('${t.id}')">Copy</button>
+      <button class="btn ghost sm" onclick="toggleSW('${t.id}')">${t.inSW?'Undo SW':'Added to SW'}</button>`:''}
+    <button class="btn ghost sm" onclick="openTx('${t.id}')">Edit</button></div></div>`;
+}
+function markPersonal(id){const t=state.tx.find(x=>x.id===id);t.reviewed=true;save();render()}
+function toggleSW(id){const t=state.tx.find(x=>x.id===id);t.inSW=!t.inSW;save();render()}
+function swText(t){
+  const w=t.split.with;
+  const how=t.split.type==='equal'?`equal, ${money(t.amount/w.length)} each`:'custom: '+w.map(i=>pname(i)+' '+money(+(t.split.amounts[i]||0))).join(', ');
+  return `${t.merchant} | ${money(t.amount)} | ${t.date} | paid by ${pname(t.paidBy)} | with ${w.map(pname).join(', ')} (${how})`;
+}
+function copySW(id){
+  const t=state.tx.find(x=>x.id===id),s=swText(t);
+  const done=()=>alert('Copied:\n'+s);
+  if(navigator.clipboard)navigator.clipboard.writeText(s).then(done,()=>prompt('Copy this:',s));else prompt('Copy this:',s);
+}
+
+/* ---------- add / edit dialog ---------- */
+let draft=null;
+function openTx(id){
+  const t=id&&state.tx.find(x=>x.id===id);
+  draft=t?JSON.parse(JSON.stringify(t)):{id:null,date:today(),merchant:'',amount:'',card:state.cards[0]||'',category:'Other',shared:false,paidBy:'me',split:{type:'equal',with:['me'],amounts:{}},note:'',reviewed:true,inSW:false,catTouched:false};
+  drawForm();$('#dlg').showModal();
+}
+function drawForm(){
+  const d=draft,ppl=[{id:'me',name:'You'}].concat(state.people);
+  const sharedBlock=d.shared?`
+    <div class="grid" style="margin-top:10px">
+      <label>Paid by<select onchange="draft.paidBy=this.value;drawForm()">${ppl.map(p=>`<option value="${p.id}" ${p.id===d.paidBy?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label>Split<select onchange="draft.split.type=this.value;drawForm()"><option value="equal" ${d.split.type==='equal'?'selected':''}>Equally</option><option value="custom" ${d.split.type==='custom'?'selected':''}>Custom amounts</option></select></label></div>
+    <div class="sub" style="margin:10px 0 4px">Who is in this split?</div>
+    ${state.people.length?'':'<div class="msg">Add people in Settings first.</div>'}
+    <div class="chips">${ppl.map(p=>`<label class="chip" style="color:var(--ink)"><input type="checkbox" ${d.split.with.includes(p.id)?'checked':''} onchange="togWith('${p.id}',this.checked)"> ${esc(p.name)}${d.split.type==='custom'&&d.split.with.includes(p.id)?` <input type="number" step="0.01" style="width:90px;padding:2px 6px" value="${d.split.amounts[p.id]||''}" oninput="draft.split.amounts['${p.id}']=+this.value">`:''}</label>`).join('')}</div>`:'';
+  $('#dlg').innerHTML=`<h3 style="margin-top:0">${d.id?'Edit':'Add'} transaction</h3>
+    <div class="grid">
+      <label>Date<input type="date" value="${d.date}" oninput="draft.date=this.value"></label>
+      <label>Amount<input type="number" step="0.01" value="${d.amount}" oninput="draft.amount=+this.value"></label>
+      <label>Merchant<input value="${esc(d.merchant)}" oninput="draft.merchant=this.value" onchange="autoCat()"></label>
+      ${d.paidBy==='me'?`<label>Card<select onchange="draft.card=this.value">${state.cards.map(c=>`<option ${c===d.card?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''}
+      <label>Category<select onchange="draft.category=this.value;draft.catTouched=true">${state.cats.map(c=>`<option ${c===d.category?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+      <label>Note<input value="${esc(d.note||'')}" oninput="draft.note=this.value"></label></div>
+    <label style="margin-top:12px;color:var(--ink)"><input type="checkbox" ${d.shared?'checked':''} onchange="togShared(this.checked)"> Shared expense (split with others)</label>
+    ${sharedBlock}
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:space-between">
+      <div>${d.id?'<button class="btn danger" onclick="delTx()">Delete</button>':''}</div>
+      <div style="display:flex;gap:8px"><button class="btn ghost" onclick="$('#dlg').close()">Cancel</button><button class="btn" onclick="saveTx()">Save</button></div></div>`;
+}
+function autoCat(){if(!draft.catTouched){draft.category=guess(draft.merchant);drawForm()}}
+function togShared(v){draft.shared=v;if(v&&!draft.split.with.includes('me'))draft.split.with.push('me');if(!v)draft.paidBy='me';drawForm()}
+function togWith(id,on){const w=draft.split.with;if(on&&!w.includes(id))w.push(id);if(!on)draft.split.with=w.filter(x=>x!==id);drawForm()}
+function saveTx(){
+  const d=draft;
+  if(!d.merchant.trim())return alert('Add a merchant.');
+  if(!(d.amount>0))return alert('Amount must be greater than zero.');
+  if(d.shared){
+    if(!d.split.with.length)return alert('Pick who is in the split.');
+    if(d.paidBy!=='me'&&!d.split.with.includes(d.paidBy))return alert('The person who paid must be in the split.');
+    if(d.split.type==='custom'){
+      const s=d.split.with.reduce((a,i)=>a+(+d.split.amounts[i]||0),0);
+      if(Math.abs(s-d.amount)>0.01)return alert(`Custom amounts add up to ${money(s)}, but the total is ${money(d.amount)}.`);
+    }
+  }
+  if(d.paidBy!=='me')d.card='';
+  d.reviewed=true;delete d.catTouched;
+  if(d.id){const i=state.tx.findIndex(x=>x.id===d.id);state.tx[i]=d}else{d.id=uid();state.tx.push(d)}
+  save();$('#dlg').close();render();
+}
+function delTx(){if(confirm('Delete this transaction?')){state.tx=state.tx.filter(x=>x.id!==draft.id);save();$('#dlg').close();render()}}
+
+/* ---------- balances ---------- */
+function vBal(){
+  if(!state.people.length)return '<div class="empty">Add the people you split with in Settings.</div>';
+  const b=balances();
+  return state.people.map(p=>{
+    const v=b[p.id];
+    const txs=state.tx.filter(t=>t.shared&&t.split.with.includes(p.id)&&(t.paidBy==='me'||t.paidBy===p.id)).sort((a,c)=>c.date.localeCompare(a.date)).slice(0,8);
+    const st=state.settlements.filter(s=>s.person===p.id).sort((a,c)=>c.date.localeCompare(a.date)).slice(0,5);
+    return `<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div><b>${esc(p.name)}</b><div class="${v>0?'pos':v<0?'neg':'sub'}" style="font-size:18px;font-weight:600">${v>0?`${esc(p.name)} owes you ${money(v)}`:v<0?`You owe ${esc(p.name)} ${money(-v)}`:'All settled'}</div></div>
+      <button class="btn" onclick="settle('${p.id}')">Settle up</button></div>
+      ${txs.length?`<div class="sub" style="margin-top:10px">Recent shared expenses</div><table>${txs.map(t=>`<tr><td>${t.date}</td><td>${esc(t.merchant)}</td><td>paid by ${esc(pname(t.paidBy))}</td><td style="text-align:right">${money(t.paidBy==='me'?shareOf(t,p.id):-shareOf(t,'me'))}</td></tr>`).join('')}</table>`:''}
+      ${st.length?`<div class="sub" style="margin-top:10px">Settlements</div><table>${st.map(s=>`<tr><td>${s.date}</td><td>${s.dir==='in'?esc(p.name)+' paid you':'You paid '+esc(p.name)}</td><td style="text-align:right">${money(s.amount)}</td></tr>`).join('')}</table>`:''}</div>`;
+  }).join('');
+}
+function settle(pid){
+  const v=balances()[pid];if(!v)return alert('Already settled.');
+  const dir=v>0?'in':'out',a=prompt(`${dir==='in'?pname(pid)+' pays you':'You pay '+pname(pid)} how much?`,Math.abs(v).toFixed(2));
+  const n=parseFloat(a);if(!(n>0))return;
+  state.settlements.push({id:uid(),person:pid,amount:r2(n),dir,date:today()});save();render();
+}
+
+/* ---------- summary ---------- */
+function vSum(){
+  const list=state.tx.filter(t=>ui.sumMonth==='all'||t.date.startsWith(ui.sumMonth));
+  const byCard={},byCat={};let mine=0;
+  list.forEach(t=>{if(t.paidBy==='me')byCard[t.card||'—']=(byCard[t.card||'—']||0)+t.amount;
+    const s=shareOf(t,'me');mine+=s;if(s)byCat[t.category]=(byCat[t.category]||0)+s});
+  const bars=o=>{const e=Object.entries(o).sort((a,b)=>b[1]-a[1]),mx=e.length?e[0][1]:1;
+    return e.length?e.map(([k,v])=>`<div class="barwrap"><span class="n">${esc(k)}</span><div class="bar2" style="width:${Math.max(2,v/mx*55)}%"></div><span class="v">${money(v)}</span></div>`).join(''):'<div class="sub">Nothing yet.</div>'};
+  const cardTotal=Object.values(byCard).reduce((a,b)=>a+b,0);
+  return `<div class="filters"><select onchange="ui.sumMonth=this.value;render()">${monthOpts(ui.sumMonth)}</select></div>
+    <div class="grid" style="margin-bottom:14px">
+      <div class="panel" style="margin:0"><div class="sub">Charged to your cards</div><div style="font-size:22px;font-weight:600">${money(cardTotal)}</div></div>
+      <div class="panel" style="margin:0"><div class="sub">Your actual share</div><div style="font-size:22px;font-weight:600">${money(mine)}</div></div></div>
+    <div class="panel"><h3>By card (what you paid)</h3>${bars(byCard)}</div>
+    <div class="panel"><h3>By category (your share)</h3>${bars(byCat)}</div>`;
+}
+
+/* ---------- import ---------- */
+function parseCSV(text){
+  const rows=[];let row=[],cell='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){cell+='"';i++}else q=false}else cell+=c}
+    else if(c==='"')q=true;else if(c===','){row.push(cell);cell=''}
+    else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);cell='';if(row.some(x=>x.trim()))rows.push(row);row=[]}
+    else cell+=c}
+  row.push(cell);if(row.some(x=>x.trim()))rows.push(row);return rows;
+}
+function parseDate(s){
+  s=(s||'').trim();let m;
+  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  if(m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)){const y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`}
+  return null;
+}
+const num=s=>{const v=parseFloat(String(s||'').replace(/[$,()\s]/g,''));return isNaN(v)?null:(/^\(.*\)$/.test(String(s).trim())?-v:v)};
+function doParse(){
+  const rows=parseCSV(imp.text);
+  if(rows.length<2){imp.msg='Need a header row plus at least one data row.';imp.rows=[];return}
+  imp.headers=rows[0].map(h=>h.trim());imp.rows=rows.slice(1);
+  const find=re=>{const i=imp.headers.findIndex(h=>re.test(h));return i<0?'':String(i)};
+  imp.map={date:find(/trans.*date|^date|posted/i)||find(/date/i),desc:find(/desc|merchant|payee|name/i),amt:find(/^amount|amount/i)||find(/debit/i)};
+  imp.msg='';
+}
+function candidates(){
+  const m=imp.map;if(m.date===''||m.desc===''||m.amt===''||!imp.card)return null;
+  const out=[];let skipped=0,dupes=0,bad=0;
+  imp.rows.forEach(r=>{
+    const date=parseDate(r[m.date]),a=num(r[m.amt]),merchant=(r[m.desc]||'').trim();
+    if(!date||a==null||!merchant){bad++;return}
+    const charge=imp.sign==='pos'?a:-a;
+    if(charge<=0){skipped++;return}
+    const amount=r2(charge);
+    if(state.tx.some(t=>t.date===date&&t.merchant===merchant&&t.amount===amount&&t.card===imp.card)){dupes++;return}
+    out.push({date,merchant,amount});
+  });
+  return {out,skipped,dupes,bad};
+}
+function vImp(){
+  const c=candidates();
+  const sel=(k)=>`<select onchange="imp.map.${k}=this.value;render()"><option value="">—</option>${imp.headers.map((h,i)=>`<option value="${i}" ${String(i)===String(imp.map[k])?'selected':''}>${esc(h)}</option>`).join('')}</select>`;
+  return `<div class="panel"><h3>Import a card statement</h3>
+    <div class="sub" style="margin-bottom:8px">Download the CSV from your card issuer, then choose the file or paste its contents. Parsing happens in your browser; nothing is uploaded.</div>
+    <input type="file" accept=".csv,text/csv,text/plain" onchange="readFile(this)">
+    <textarea rows="5" placeholder="…or paste CSV here (first row = headers)" style="margin-top:8px" oninput="imp.text=this.value">${esc(imp.text)}</textarea>
+    <div style="margin-top:8px"><button class="btn" onclick="doParse();render()">Read CSV</button></div>
+    ${imp.msg?`<div class="msg" style="margin-top:8px">${esc(imp.msg)}</div>`:''}</div>
+    ${imp.headers.length?`<div class="panel"><h3>Map the columns</h3><div class="grid">
+      <label>Card<select onchange="imp.card=this.value;render()"><option value="">Choose…</option>${state.cards.map(x=>`<option ${x===imp.card?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+      <label>Date column${sel('date')}</label><label>Description column${sel('desc')}</label><label>Amount column${sel('amt')}</label>
+      <label>Charges show up as<select onchange="imp.sign=this.value;render()"><option value="pos" ${imp.sign==='pos'?'selected':''}>Positive numbers</option><option value="neg" ${imp.sign==='neg'?'selected':''}>Negative numbers</option></select></label></div>
+      ${c?`<div class="msg" style="margin-top:10px">${c.out.length} new charges ready · ${c.skipped} payments/credits skipped · ${c.dupes} duplicates skipped${c.bad?` · ${c.bad} unreadable rows`:''}</div>
+        ${c.out.length?`<table style="margin-top:8px">${c.out.slice(0,6).map(t=>`<tr><td>${t.date}</td><td>${esc(t.merchant)}</td><td>${esc(guess(t.merchant))}</td><td style="text-align:right">${money(t.amount)}</td></tr>`).join('')}</table>
+        <div style="margin-top:10px"><button class="btn" onclick="runImport()">Import ${c.out.length} transactions</button></div>`:''}`:'<div class="sub" style="margin-top:10px">Pick the card and columns to see a preview.</div>'}</div>`:''}
+    ${imp.headers.length?'<div class="sub">Imported rows land in “Needs review” so you can mark each as personal or shared.</div>':''}`;
+}
+function readFile(el){const f=el.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{imp.text=String(r.result);doParse();render()};r.readAsText(f)}
+function runImport(){
+  const c=candidates();if(!c||!c.out.length)return;
+  c.out.forEach(t=>state.tx.push({id:uid(),date:t.date,merchant:t.merchant,amount:t.amount,card:imp.card,category:guess(t.merchant),shared:false,paidBy:'me',split:{type:'equal',with:['me'],amounts:{}},note:'',reviewed:false,inSW:false}));
+  save();const n=c.out.length;imp={text:'',rows:[],headers:[],map:{},card:imp.card,sign:imp.sign,msg:''};
+  ui.tab='tx';ui.filter='review';ui.month='all';render();alert(n+' transactions imported. Review them below.');
+}
+
+/* ---------- settings ---------- */
+function chips(arr,fn,del){return `<div class="chips">${arr.map((x,i)=>`<span class="chip">${esc(fn(x))}<button title="Remove" onclick="${del}(${i})">✕</button></span>`).join('')||'<span class="sub">None yet</span>'}</div>`}
+function vSet(){
+  return `<div class="panel"><h3>People you split with</h3>${chips(state.people,p=>p.name,'delPerson')}
+      <div style="display:flex;gap:8px;margin-top:10px"><input id="np" placeholder="Name"><button class="btn" onclick="addPerson()">Add</button></div></div>
+    <div class="panel"><h3>Cards</h3>${chips(state.cards,x=>x,'delCard')}
+      <div style="display:flex;gap:8px;margin-top:10px"><input id="nc" placeholder="Card name"><button class="btn" onclick="addCard()">Add</button></div></div>
+    <div class="panel"><h3>Categories</h3>${chips(state.cats,x=>x,'delCat')}
+      <div style="display:flex;gap:8px;margin-top:10px"><input id="ncat" placeholder="Category"><button class="btn" onclick="addCat()">Add</button></div></div>
+    <div class="panel"><h3>Auto-category rules</h3><div class="sub" style="margin-bottom:6px">If a merchant contains the text, it gets that category.</div>
+      ${chips(state.rules,r=>r.k+' → '+r.c,'delRule')}
+      <div style="display:flex;gap:8px;margin-top:10px"><input id="rk" placeholder="Merchant contains…"><select id="rc">${state.cats.map(c=>`<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="addRule()">Add</button></div></div>
+    <div class="panel"><h3>Backup</h3><div class="sub" style="margin-bottom:8px">Your data lives only in this browser. Download a backup now and then, and use it to move to another device.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="exportJSON()">Download backup</button>
+      <label class="btn ghost" style="display:inline-block;cursor:pointer;color:var(--acc)">Restore backup<input type="file" accept=".json" hidden onchange="restoreJSON(this)"></label>
+      <button class="btn ghost" onclick="exportCSV()">Export CSV</button>
+      <button class="btn danger" onclick="wipe()">Erase everything</button></div></div>`;
+}
+function addPerson(){const v=$('#np').value.trim();if(!v)return;state.people.push({id:uid(),name:v});save();render()}
+function delPerson(i){const p=state.people[i];if(state.tx.some(t=>t.shared&&(t.paidBy===p.id||t.split.with.includes(p.id)))&&!confirm(p.name+' appears in shared expenses. Remove anyway?'))return;state.people.splice(i,1);save();render()}
+function addCard(){const v=$('#nc').value.trim();if(!v||state.cards.includes(v))return;state.cards.push(v);save();render()}
+function delCard(i){state.cards.splice(i,1);save();render()}
+function addCat(){const v=$('#ncat').value.trim();if(!v||state.cats.includes(v))return;state.cats.push(v);save();render()}
+function delCat(i){state.cats.splice(i,1);save();render()}
+function addRule(){const k=$('#rk').value.trim();if(!k)return;state.rules.unshift({k,c:$('#rc').value});save();render()}
+function delRule(i){state.rules.splice(i,1);save();render()}
+function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function exportJSON(){download('cctracker-backup-'+today()+'.json',JSON.stringify(state,null,2),'application/json')}
+function restoreJSON(el){const f=el.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const s=JSON.parse(r.result);if(!Array.isArray(s.tx))throw 0;if(!confirm('Replace current data with this backup?'))return;state=Object.assign(fresh(),s);save();render()}catch(e){alert('That file is not a valid backup.')}};r.readAsText(f)}
+function exportCSV(){
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const lines=[['date','merchant','amount','card','category','shared','paid_by','split_with','my_share','in_splitwise','note'].join(',')];
+  state.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>lines.push([t.date,t.merchant,t.amount,t.card,t.category,t.shared?'yes':'no',pname(t.paidBy),t.shared?t.split.with.map(pname).join('; '):'',r2(shareOf(t,'me')),t.shared?(t.inSW?'yes':'no'):'',t.note].map(q).join(',')));
+  download('cctracker-'+today()+'.csv',lines.join('\n'),'text/csv');
+}
+function wipe(){if(confirm('Erase all transactions, people and settings from this browser?')&&confirm('This cannot be undone. Continue?')){state=fresh();save();render()}}
+
+render();
+</script>
+</body>
+</html>
