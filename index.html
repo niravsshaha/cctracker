@@ -59,6 +59,7 @@ td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
   <div class="bar"><h1>Card Tracker</h1><button class="btn" onclick="openTx()">+ Add transaction</button></div>
   <nav>
     <button data-t="tx" onclick="go('tx')">Transactions</button>
+    <button data-t="cards" onclick="go('cards')">Cards</button>
     <button data-t="bal" onclick="go('bal')">Balances</button>
     <button data-t="sum" onclick="go('sum')">Summary</button>
     <button data-t="acc" onclick="go('acc')">Accounts</button>
@@ -76,7 +77,7 @@ const DEFAULT_CATS=['Groceries','Dining','Gas','Travel','Shopping','Entertainmen
 const DEFAULT_RULES=[['costco','Groceries'],['walmart','Groceries'],['patel','Groceries'],['trader joe','Groceries'],['whole foods','Groceries'],['uber eats','Dining'],['doordash','Dining'],['uber','Travel'],['lyft','Travel'],['airlines','Travel'],['shell','Gas'],['chevron','Gas'],['exxon','Gas'],['netflix','Entertainment'],['spotify','Entertainment'],['amazon','Shopping'],['target','Shopping']].map(([k,c])=>({k,c}));
 
 const DEFAULT_ACCTS=['PNC Checking','PNC Growth','Chase Checking','SoFi','Wealthfront','Marcus'];
-function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),cardStart:{},accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
+function fresh(){return{cards:DEFAULT_CARDS.slice(),cats:DEFAULT_CATS.slice(),people:[],tx:[],settlements:[],rules:DEFAULT_RULES.slice(),cardStart:{},cardOwed:{},cardPay:[],accounts:DEFAULT_ACCTS.map(n=>({id:'acct_'+n.toLowerCase().replace(/\W+/g,'_'),name:n,opening:0})),ledger:[]}}
 function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx))return Object.assign(fresh(),s)}catch(e){}return fresh()}
 let state=load();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
@@ -119,7 +120,7 @@ let bimp={text:'',blocks:[],year:new Date().getFullYear(),msg:''};
 function go(t){ui.tab=t;render()}
 function render(){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===ui.tab));
-  $('#app').innerHTML=({tx:vTx,bal:vBal,sum:vSum,acc:vAcc,imp:vImp,set:vSet})[ui.tab]();
+  $('#app').innerHTML=({tx:vTx,cards:vCards,bal:vBal,sum:vSum,acc:vAcc,imp:vImp,set:vSet})[ui.tab]();
 }
 const months=()=>[...new Set(state.tx.map(t=>t.date.slice(0,7)))].sort().reverse();
 const monthOpts=sel=>'<option value="all">All months</option>'+months().map(m=>`<option ${m===sel?'selected':''}>${m}</option>`).join('');
@@ -242,6 +243,42 @@ function settle(pid){
   const dir=v>0?'in':'out',a=prompt(`${dir==='in'?pname(pid)+' pays you':'You pay '+pname(pid)} how much?`,Math.abs(v).toFixed(2));
   const n=parseFloat(a);if(!(n>0))return;
   state.settlements.push({id:uid(),person:pid,amount:r2(n),dir,date:today()});save();render();
+}
+
+/* ---------- credit cards: remaining to pay ---------- */
+function cardSpent(c){return state.tx.filter(t=>t.paidBy==='me'&&t.card===c).reduce((s,t)=>s+t.amount,0)}
+function cardPaid(c){return (state.cardPay||[]).filter(p=>p.card===c).reduce((s,p)=>s+p.amount,0)}
+function cardOwedNow(c){return r2((+((state.cardOwed||{})[c])||0)+cardSpent(c)-cardPaid(c))}
+function vCards(){
+  const tot=r2(state.cards.reduce((s,c)=>s+cardOwedNow(c),0));
+  const pays=(state.cardPay||[]).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
+  return `<div class="panel"><div class="sub">Total remaining to pay on cards</div><div style="font-size:22px;font-weight:600">${money(tot)}</div>
+    <div class="sub" style="margin-top:4px">New charges you add raise a card's balance; a payment lowers it.</div></div>`+
+   state.cards.map((c,i)=>{const o=cardOwedNow(c);return `<div class="row"><div class="main"><b>${esc(c)}</b><div class="sub">Remaining to pay</div></div><div class="amt ${o>0?'neg':''}">${money(o)}</div><div style="display:flex;gap:5px"><button class="btn sm" onclick="openPay(${i})">Pay</button><button class="btn ghost sm" onclick="setCardStart(${i})">Set balance</button></div></div>`}).join('')+
+   (pays.length?`<div class="panel" style="margin-top:14px"><h3>Recent payments</h3><table>${pays.map(p=>`<tr><td>${p.date}</td><td>${esc(p.card)}</td><td>${p.acct?esc((state.accounts.find(a=>a.id===p.acct)||{name:'?'}).name):'—'}</td><td style="text-align:right">${money(p.amount)}</td><td><button class="btn danger sm" onclick="delPay('${p.id}')">✕</button></td></tr>`).join('')}</table></div>`:'');
+}
+let pd=null;
+function openPay(i){const c=state.cards[i],o=cardOwedNow(c);pd={card:c,amount:o>0?o:'',date:today(),acct:''};drawPay();$('#dlg').showModal()}
+function drawPay(){
+  const d=pd;
+  $('#dlg').innerHTML=`<h3 style="margin-top:0">Pay ${esc(d.card)}</h3><div class="grid">
+   <label>Amount<input type="number" step="0.01" value="${d.amount}" oninput="pd.amount=this.value"></label>
+   <label>Date<input type="date" value="${d.date}" oninput="pd.date=this.value"></label>
+   <label>Paid from<select onchange="pd.acct=this.value"><option value="">Not tracked in an account</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===d.acct?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label></div>
+   <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button class="btn ghost" onclick="$('#dlg').close()">Cancel</button><button class="btn" onclick="savePay()">Save payment</button></div>`;
+}
+function savePay(){
+  const a=+pd.amount;if(!(a>0))return alert('Enter the payment amount.');if(!pd.date)return alert('Pick a date.');
+  const id=uid();state.cardPay=state.cardPay||[];
+  state.cardPay.push({id,card:pd.card,date:pd.date,amount:r2(a),acct:pd.acct});
+  if(pd.acct)state.ledger.push({id:uid(),acct:pd.acct,date:pd.date,who:pd.card,reason:'credit card payment',debit:r2(a),credit:0,pay:id});
+  save();$('#dlg').close();render();
+}
+function delPay(id){if(!confirm('Delete this payment?'))return;state.cardPay=state.cardPay.filter(p=>p.id!==id);state.ledger=state.ledger.filter(e=>e.pay!==id);save();render()}
+function setCardStart(i){
+  const c=state.cards[i],v=prompt('How much do you owe on '+c+' right now?',Math.max(0,cardOwedNow(c)));
+  if(v===null)return;const n=parseFloat(v);if(isNaN(n))return;
+  state.cardOwed=state.cardOwed||{};state.cardOwed[c]=r2(n-cardSpent(c)+cardPaid(c));save();render();
 }
 
 /* ---------- people + Splitwise matching ---------- */
